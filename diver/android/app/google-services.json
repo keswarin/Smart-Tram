@@ -1,0 +1,83 @@
+{
+  "project_info": {
+    "project_number": "914093030372",
+    "firebase_url": "https://shuttle-tracking-7f71a-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "shuttle-tracking-7f71a",
+    "storage_bucket": "shuttle-tracking-7f71a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:914093030372:android:52c0d851e1b6c7c248e5f1",
+        "android_client_info": {
+          "package_name": "com.example.driver_tram_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "914093030372-idtb8nv59tsgshd9gjolma2m5k5245am.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgX2MNdZTibI6dIG0LQYULoARAesQw9I8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "914093030372-idtb8nv59tsgshd9gjolma2m5k5245am.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "914093030372-2f6lrnmahle4g0o8vrlcqdbjhuvtclvu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.driverTramApp"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:914093030372:android:108d4f6ad87151c148e5f1",
+        "android_client_info": {
+          "package_name": "com.example.flutter_application_1"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "914093030372-idtb8nv59tsgshd9gjolma2m5k5245am.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgX2MNdZTibI6dIG0LQYULoARAesQw9I8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "914093030372-idtb8nv59tsgshd9gjolma2m5k5245am.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "914093030372-2f6lrnmahle4g0o8vrlcqdbjhuvtclvu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.driverTramApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

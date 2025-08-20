@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>แอปนี้ต้องการเข้าถึงตำแหน่งของคุณขณะใช้งาน เพื่อแสดงตำแหน่งปัจจุบันบนแผนที่และอัปเดตสถานะคนขับ</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>แอปนี้อาจต้องการเข้าถึงตำแหน่งของคุณเบื้องหลัง เพื่อแชร์ตำแหน่งคนขับอย่างต่อเนื่องแม้ปิดหน้าจอ (ถ้าต้องการใช้ Background Location)</string>
+    <key>NSLocationAlwaysUsageDescription</key> <string>แอปนี้อาจต้องการเข้าถึงตำแหน่งของคุณเบื้องหลัง เพื่อแชร์ตำแหน่งคนขับอย่างต่อเนื่อง</string>
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+    </dict>
+</plist>
