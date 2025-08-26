@@ -7,13 +7,13 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart'; // <<< สำหรับคำนวณระยะทาง
 import 'firebase_options.dart';
 
 // URL ของ API ที่คุณได้มาจากการ Deploy
-const String apiUrl =
-    "https://asia-southeast1-shuttle-tracking-7f71a.cloudfunctions.net/api";
+const String apiUrl = "https://api-nlcuxevdba-as.a.run.app";
 
-// --- Models (เหมือนเดิม) ---
+// --- Models ---
 class Building {
   final String id;
   final String name;
@@ -27,10 +27,24 @@ class RideRequest {
   final String id;
   final String status;
   final String? driverId;
-  RideRequest({required this.id, required this.status, this.driverId});
+  final String pickupPointId; // <<< เพิ่มเข้ามา
+
+  RideRequest(
+      {required this.id,
+      required this.status,
+      this.driverId,
+      required this.pickupPointId});
 }
 
-// --- Main (เหมือนเดิม) ---
+class Driver {
+  final String id;
+  final String name;
+  final LatLng position;
+
+  Driver({required this.id, required this.name, required this.position});
+}
+
+// --- Main ---
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -49,7 +63,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// --- หน้าจอเรียกรถ (Request Screen - เหมือนเดิม) ---
+// --- หน้าจอเรียกรถ (Request Screen) ---
 class RequestScreen extends StatefulWidget {
   const RequestScreen({super.key});
   @override
@@ -57,9 +71,11 @@ class RequestScreen extends StatefulWidget {
 }
 
 class _RequestScreenState extends State<RequestScreen> {
+  // ... (โค้ดส่วนนี้เหมือนเดิมทุกประการ) ...
   List<Building> _buildings = [];
   Building? _selectedPickup;
   Building? _selectedDropoff;
+  int _passengerCount = 1;
   bool _isLoading = true;
   String _statusMessage = '';
 
@@ -108,6 +124,7 @@ class _RequestScreenState extends State<RequestScreen> {
           'dropoffBuildingId': _selectedDropoff!.id,
           'pickupPointName': _selectedPickup!.name,
           'dropoffPointName': _selectedDropoff!.name,
+          'passengerCount': _passengerCount,
         }),
       );
       if (response.statusCode == 201 && mounted) {
@@ -128,6 +145,7 @@ class _RequestScreenState extends State<RequestScreen> {
     setState(() {
       _selectedPickup = null;
       _selectedDropoff = null;
+      _passengerCount = 1;
       _statusMessage = '';
     });
   }
@@ -135,7 +153,20 @@ class _RequestScreenState extends State<RequestScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Request a Ride')),
+      appBar: AppBar(
+        title: const Text('Request a Ride'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.map),
+            tooltip: 'Live Map',
+            onPressed: () {
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (context) => const LiveMapScreen(),
+              ));
+            },
+          ),
+        ],
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24.0),
@@ -145,6 +176,30 @@ class _RequestScreenState extends State<RequestScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Container(
+                      padding: const EdgeInsets.all(12.0),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8.0),
+                        border: Border.all(color: Colors.green),
+                      ),
+                      child: const Column(
+                        children: [
+                          Text(
+                            'เวลาให้บริการ',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.green),
+                          ),
+                          SizedBox(height: 4),
+                          Text('เช้า: 07.00–09.00 น.'),
+                          Text('เที่ยง: 11.00–13.00 น.'),
+                          Text('เย็น: 15.00–17.45 น.'),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
                     DropdownButtonFormField<Building>(
                       value: _selectedPickup,
                       hint: const Text('Select Pickup Location'),
@@ -165,10 +220,42 @@ class _RequestScreenState extends State<RequestScreen> {
                       onChanged: (val) =>
                           setState(() => _selectedDropoff = val),
                     ),
+                    const SizedBox(height: 20),
+                    DropdownButtonFormField<int>(
+                      value: _passengerCount,
+                      decoration:
+                          const InputDecoration(labelText: 'Passengers'),
+                      items: List.generate(10, (index) => index + 1)
+                          .map((count) => DropdownMenuItem(
+                                value: count,
+                                child: Text('$count person(s)'),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _passengerCount = value;
+                          });
+                        }
+                      },
+                    ),
                     const SizedBox(height: 40),
                     ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16)),
                       onPressed: _submitRequest,
-                      child: const Text('Confirm Request'),
+                      child: const Text('Confirm Request',
+                          style: TextStyle(fontSize: 16)),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.map),
+                      label: const Text('View Live Map'),
+                      onPressed: () {
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (context) => const LiveMapScreen(),
+                        ));
+                      },
                     ),
                     if (_statusMessage.isNotEmpty)
                       Padding(
@@ -184,7 +271,7 @@ class _RequestScreenState extends State<RequestScreen> {
   }
 }
 
-// --- หน้าจอติดตามรถ (Tracking Screen - เหมือนเดิม) ---
+// --- หน้าจอติดตามรถ (Tracking Screen) ---
 class TrackingScreen extends StatefulWidget {
   final String requestId;
   const TrackingScreen({super.key, required this.requestId});
@@ -195,7 +282,6 @@ class TrackingScreen extends StatefulWidget {
 
 class _TrackingScreenState extends State<TrackingScreen> {
   Stream<DocumentSnapshot>? _requestStream;
-  RideRequest? _rideRequest;
 
   @override
   void initState() {
@@ -221,13 +307,14 @@ class _TrackingScreenState extends State<TrackingScreen> {
           }
 
           final data = snapshot.data!.data() as Map<String, dynamic>;
-          _rideRequest = RideRequest(
+          final rideRequest = RideRequest(
             id: snapshot.data!.id,
             status: data['status'],
             driverId: data['driverId'],
+            pickupPointId: data['pickupPointId'], // <<< ส่งค่า
           );
 
-          switch (_rideRequest!.status) {
+          switch (rideRequest.status) {
             case 'pending':
               return const Center(
                 child: Column(
@@ -240,7 +327,11 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 ),
               );
             case 'accepted':
-              return DriverTrackingMap(driverId: _rideRequest!.driverId!);
+              // --- 🎯 ส่ง requestId ไปด้วย ---
+              return DriverTrackingMap(
+                driverId: rideRequest.driverId!,
+                requestId: rideRequest.id,
+              );
             case 'completed':
               return Center(
                 child: Column(
@@ -261,7 +352,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
               );
             default:
               return Center(
-                  child: Text('Unknown status: ${_rideRequest!.status}'));
+                  child: Text('Unknown status: ${rideRequest.status}'));
           }
         },
       ),
@@ -272,17 +363,21 @@ class _TrackingScreenState extends State<TrackingScreen> {
 // --- Widget แผนที่สำหรับติดตามคนขับ (อัปเกรดใหม่) ---
 class DriverTrackingMap extends StatefulWidget {
   final String driverId;
-  const DriverTrackingMap({super.key, required this.driverId});
+  final String requestId; // <<< เพิ่มเข้ามา
+  const DriverTrackingMap(
+      {super.key, required this.driverId, required this.requestId});
 
   @override
   State<DriverTrackingMap> createState() => _DriverTrackingMapState();
 }
 
 class _DriverTrackingMapState extends State<DriverTrackingMap> {
-  Stream<DocumentSnapshot>? _driverStream;
+  late StreamSubscription<DocumentSnapshot> _driverSubscription;
   GoogleMapController? _mapController;
-  Marker? _driverMarker;
-  BitmapDescriptor? _tramIcon; // <<< ตัวแปรสำหรับเก็บไอคอนรถราง
+  final Set<Marker> _markers = {};
+  BitmapDescriptor? _tramIcon;
+  String _distanceMessage = 'Calculating distance...'; // <<< State ใหม่
+  LatLng? _driverPosition; // <<< State ใหม่
 
   static const CameraPosition _initialPosition = CameraPosition(
     target: LatLng(18.9039, 98.9216),
@@ -292,18 +387,187 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
   @override
   void initState() {
     super.initState();
-    _loadTramIcon(); // <<< เรียกใช้ฟังก์ชันโหลดไอคอน
-    _driverStream = FirebaseFirestore.instance
-        .collection('drivers')
-        .doc(widget.driverId)
-        .snapshots();
+    _loadTramIcon();
+    _subscribeToDriverLocation();
   }
 
-  // --- ฟังก์ชันใหม่: โหลดไอคอนรถรางจาก assets ---
+  @override
+  void dispose() {
+    _driverSubscription.cancel();
+    super.dispose();
+  }
+
   Future<void> _loadTramIcon() async {
     final icon = await BitmapDescriptor.fromAssetImage(
       const ImageConfiguration(size: Size(48, 48)),
-      'assets/images/tram_icon.png', // <<< Path ไปยังไฟล์รูปของคุณ
+      'assets/images/tram_icon.png',
+    );
+    if (mounted) setState(() => _tramIcon = icon);
+  }
+
+  void _subscribeToDriverLocation() {
+    final driverRef =
+        FirebaseFirestore.instance.collection('drivers').doc(widget.driverId);
+    _driverSubscription = driverRef.snapshots().listen((snapshot) {
+      if (snapshot.exists && mounted) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        final location = data['currentLocation'] as GeoPoint?;
+        if (location != null) {
+          _driverPosition = LatLng(location.latitude, location.longitude);
+          _updateMarkerAndDistance(location);
+        }
+      }
+    });
+  }
+
+  // --- ฟังก์ชันใหม่: คำนวณระยะทางและอัปเดต UI ---
+  Future<void> _updateMarkerAndDistance(GeoPoint driverLocationGeo) async {
+    final driverLatLng =
+        LatLng(driverLocationGeo.latitude, driverLocationGeo.longitude);
+
+    // ดึงตำแหน่งจุดรับของผู้ใช้
+    final requestDoc = await FirebaseFirestore.instance
+        .collection('ride_requests')
+        .doc(widget.requestId)
+        .get();
+    if (!requestDoc.exists) return;
+
+    final requestData = requestDoc.data()!;
+    final pickupPointId = requestData['pickupPointId'];
+    final pickupDoc = await FirebaseFirestore.instance
+        .collection('pickup_points')
+        .doc(pickupPointId)
+        .get();
+    if (!pickupDoc.exists) return;
+
+    final pickupLocationGeo = pickupDoc.data()!['coordinates'] as GeoPoint;
+    final pickupLatLng =
+        LatLng(pickupLocationGeo.latitude, pickupLocationGeo.longitude);
+
+    // คำนวณระยะทาง
+    final distanceInMeters = Geolocator.distanceBetween(
+      driverLatLng.latitude,
+      driverLatLng.longitude,
+      pickupLatLng.latitude,
+      pickupLatLng.longitude,
+    );
+    final distanceInKm = distanceInMeters / 1000;
+
+    // สร้าง Marker
+    final driverMarker = Marker(
+      markerId: const MarkerId('driver'),
+      position: driverLatLng,
+      icon: _tramIcon ?? BitmapDescriptor.defaultMarker,
+      anchor: const Offset(0.5, 0.5),
+      flat: true,
+    );
+
+    // อัปเดต State
+    if (mounted) {
+      setState(() {
+        _markers.clear();
+        _markers.add(driverMarker);
+        _distanceMessage =
+            'Driver will arrive in ${distanceInKm.toStringAsFixed(2)} km';
+      });
+    }
+  }
+
+  // --- ฟังก์ชันใหม่: เลื่อนกล้องไปหาคนขับ ---
+  void _centerOnDriver() {
+    if (_driverPosition != null && _mapController != null) {
+      _mapController!.animateCamera(CameraUpdate.newLatLng(_driverPosition!));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // --- ใช้ Stack เพื่อวาง Widget ซ้อนกัน ---
+    return Stack(
+      children: [
+        GoogleMap(
+          initialCameraPosition: _initialPosition,
+          onMapCreated: (controller) => _mapController = controller,
+          markers: _markers,
+        ),
+        // --- กล่องแสดงระยะทาง ---
+        Positioned(
+          top: 10,
+          left: 20,
+          right: 20,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: const [
+                BoxShadow(
+                    color: Colors.black26, blurRadius: 5, offset: Offset(0, 2)),
+              ],
+            ),
+            child: Text(
+              _distanceMessage,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+        // --- ปุ่มติดตาม ---
+        Positioned(
+          bottom: 20,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: FloatingActionButton(
+              onPressed: _centerOnDriver,
+              tooltip: 'Center on Driver',
+              child: const Icon(Icons.my_location),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// --- หน้าจอแผนที่สด (Live Map Screen) ---
+class LiveMapScreen extends StatefulWidget {
+  const LiveMapScreen({super.key});
+
+  @override
+  State<LiveMapScreen> createState() => _LiveMapScreenState();
+}
+
+class _LiveMapScreenState extends State<LiveMapScreen> {
+  // ... (โค้ดส่วนนี้เหมือนเดิมทุกประการ) ...
+  late StreamSubscription<QuerySnapshot> _driversSubscription;
+  GoogleMapController? _mapController;
+  final Set<Marker> _markers = {};
+  List<Driver> _onlineDrivers = [];
+  BitmapDescriptor? _tramIcon;
+
+  static const CameraPosition _initialPosition = CameraPosition(
+    target: LatLng(18.9039, 98.9216),
+    zoom: 15,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTramIcon();
+    _subscribeToAllDrivers();
+  }
+
+  @override
+  void dispose() {
+    _driversSubscription.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadTramIcon() async {
+    final icon = await BitmapDescriptor.fromAssetImage(
+      const ImageConfiguration(size: Size(48, 48)),
+      'assets/images/tram_icon.png',
     );
     if (mounted) {
       setState(() {
@@ -312,46 +576,96 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
     }
   }
 
-  // --- อัปเกรด: ใช้ไอคอนใหม่ในการสร้าง Marker ---
-  void _updateMarker(GeoPoint location) {
-    final newPosition = LatLng(location.latitude, location.longitude);
-    if (mounted) {
-      setState(() {
-        _driverMarker = Marker(
-          markerId: const MarkerId('driver'),
-          position: newPosition,
-          icon:
-              _tramIcon ?? BitmapDescriptor.defaultMarker, // <<< ใช้ไอคอนรถราง
-          infoWindow: const InfoWindow(title: 'Driver'),
-          anchor: const Offset(0.5, 0.5), // ทำให้ไอคอนอยู่ตรงกลางพิกัด
-          flat: true, // ทำให้ไอคอนไม่หมุนตามแผนที่
+  void _subscribeToAllDrivers() {
+    final driversQuery = FirebaseFirestore.instance
+        .collection('drivers')
+        .where('isOnline', isEqualTo: true);
+
+    _driversSubscription = driversQuery.snapshots().listen((snapshot) {
+      if (mounted) {
+        _updateMarkersAndDriverList(snapshot.docs);
+      }
+    });
+  }
+
+  void _updateMarkersAndDriverList(List<QueryDocumentSnapshot> driverDocs) {
+    final Set<Marker> updatedMarkers = {};
+    final List<Driver> updatedDrivers = [];
+
+    for (var doc in driverDocs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final location = data['currentLocation'] as GeoPoint?;
+      if (location != null) {
+        final position = LatLng(location.latitude, location.longitude);
+
+        updatedMarkers.add(
+          Marker(
+            markerId: MarkerId(doc.id),
+            position: position,
+            icon: _tramIcon ?? BitmapDescriptor.defaultMarker,
+            infoWindow: InfoWindow(title: data['displayName'] ?? 'Driver'),
+            anchor: const Offset(0.5, 0.5),
+            flat: true,
+          ),
         );
-      });
+
+        updatedDrivers.add(Driver(
+            id: doc.id,
+            name: data['displayName'] ?? 'Driver',
+            position: position));
+      }
     }
-    _mapController?.animateCamera(CameraUpdate.newLatLng(newPosition));
+    setState(() {
+      _markers.clear();
+      _markers.addAll(updatedMarkers);
+      _onlineDrivers = updatedDrivers;
+    });
+  }
+
+  void _goToDriver(LatLng position) {
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngZoom(position, 17),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: _driverStream,
-      builder: (context, snapshot) {
-        if (snapshot.hasData && snapshot.data!.exists) {
-          final data = snapshot.data!.data() as Map<String, dynamic>;
-          final location = data['currentLocation'] as GeoPoint?;
-          if (location != null) {
-            // เรียกใช้ _updateMarker เมื่อมีข้อมูลใหม่
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _updateMarker(location);
-            });
-          }
-        }
-        return GoogleMap(
-          initialCameraPosition: _initialPosition,
-          onMapCreated: (controller) => _mapController = controller,
-          markers: _driverMarker != null ? {_driverMarker!} : {},
-        );
-      },
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Live Tram Map'),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: GoogleMap(
+              initialCameraPosition: _initialPosition,
+              markers: _markers,
+              onMapCreated: (controller) => _mapController = controller,
+            ),
+          ),
+          Container(
+            height: 80,
+            color: Colors.white,
+            child: _onlineDrivers.isEmpty
+                ? const Center(child: Text('No drivers online.'))
+                : ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _onlineDrivers.length,
+                    itemBuilder: (context, index) {
+                      final driver = _onlineDrivers[index];
+                      return Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.directions_bus),
+                          label: Text(driver.name),
+                          onPressed: () => _goToDriver(driver.position),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
