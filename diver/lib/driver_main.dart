@@ -12,9 +12,8 @@ import 'firebase_options.dart';
 // URL ของ API
 const String apiUrl = "https://api-nlcuxevdba-as.a.run.app";
 
-// --- 🎯 แก้ไข: ID ของคนขับคนที่ 2 ---
+// ID ของคนขับ
 const String currentDriverId = "oL5Ub0sKjwQdQ6xizvx9GZxFRau1";
-// ------------------------------------
 
 // --- Models ---
 class RideRequest {
@@ -38,16 +37,11 @@ class RideRequest {
   }
 }
 
-class GroupedTrip {
-  final String pickupPointName;
-  final String dropoffPointName;
-  int totalPassengers;
+class TripSummary {
+  final Map<String, int> pickups;
+  final Map<String, int> dropoffs;
 
-  GroupedTrip({
-    required this.pickupPointName,
-    required this.dropoffPointName,
-    this.totalPassengers = 0,
-  });
+  TripSummary({required this.pickups, required this.dropoffs});
 }
 
 Future<void> main() async {
@@ -66,8 +60,16 @@ class DriverApp extends StatelessWidget {
     return MaterialApp(
       title: 'Driver App',
       theme: ThemeData(
-        primarySwatch: Colors.orange,
+        primarySwatch: Colors.deepPurple,
         visualDensity: VisualDensity.adaptivePlatformDensity,
+        scaffoldBackgroundColor: const Color(0xFFF4F6F8),
+        // ✅ ใช้ CardThemeData ที่ถูกต้อง
+        cardTheme: CardThemeData(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
       ),
       home: const DriverScreen(),
     );
@@ -84,17 +86,11 @@ class DriverScreen extends StatefulWidget {
 class _DriverScreenState extends State<DriverScreen> {
   Timer? _locationUpdateTimer;
   String _locationStatus = 'Initializing...';
-  Stream<QuerySnapshot>? _myTripsStream;
 
   @override
   void initState() {
     super.initState();
     _startLocationUpdates();
-    _myTripsStream = FirebaseFirestore.instance
-        .collection('ride_requests')
-        .where('driverId', isEqualTo: currentDriverId)
-        .where('status', isEqualTo: 'accepted')
-        .snapshots();
   }
 
   @override
@@ -104,6 +100,7 @@ class _DriverScreenState extends State<DriverScreen> {
   }
 
   Future<void> _startLocationUpdates() async {
+    // ... (โค้ดส่วนนี้เหมือนเดิม) ...
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
@@ -136,25 +133,6 @@ class _DriverScreenState extends State<DriverScreen> {
           setState(() => _locationStatus = 'Could not get location.');
       }
     });
-  }
-
-  List<GroupedTrip> _groupTrips(List<RideRequest> requests) {
-    final Map<String, GroupedTrip> groupedMap = {};
-
-    for (var request in requests) {
-      final key = '${request.pickupPointName}-${request.dropoffPointName}';
-
-      if (groupedMap.containsKey(key)) {
-        groupedMap[key]!.totalPassengers += request.passengerCount;
-      } else {
-        groupedMap[key] = GroupedTrip(
-          pickupPointName: request.pickupPointName,
-          dropoffPointName: request.dropoffPointName,
-          totalPassengers: request.passengerCount,
-        );
-      }
-    }
-    return groupedMap.values.toList();
   }
 
   Future<void> _updateDriverStatus(String status, {String? reason}) async {
@@ -214,7 +192,11 @@ class _DriverScreenState extends State<DriverScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('My Assigned Trips'),
+            title: Text(
+                driverStatus == 'online' ? 'Driver App' : 'Service Paused'),
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.black,
+            elevation: 0,
           ),
           floatingActionButtonLocation:
               FloatingActionButtonLocation.centerFloat,
@@ -234,7 +216,9 @@ class _DriverScreenState extends State<DriverScreen> {
           bottomNavigationBar: BottomAppBar(
             child: Padding(
               padding: const EdgeInsets.all(8.0),
-              child: Text(_locationStatus, textAlign: TextAlign.center),
+              child: Text(_locationStatus,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.grey)),
             ),
           ),
           body: _buildDriverBody(driverStatus, driverData),
@@ -243,11 +227,12 @@ class _DriverScreenState extends State<DriverScreen> {
     );
   }
 
+  // --- 🎯 แก้ไข: เปลี่ยน Logic การแสดงผลทั้งหมด ---
   Widget _buildDriverBody(
       String driverStatus, Map<String, dynamic> driverData) {
+    // ถ้าคนขับหยุดพัก ให้แสดงหน้าจอหยุดพัก
     if (driverStatus == 'paused') {
       final reason = driverData['pauseReason'] ?? '';
-
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -267,52 +252,109 @@ class _DriverScreenState extends State<DriverScreen> {
       );
     }
 
+    // ถ้าคนขับออนไลน์ ให้ไปดึงงานที่ได้รับมอบหมายมาแสดง
+    // ใช้ StreamBuilder อีกชั้นเพื่อดึงข้อมูลงานแบบ Real-time
     return StreamBuilder<QuerySnapshot>(
-      stream: _myTripsStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+      stream: FirebaseFirestore.instance
+          .collection('ride_requests')
+          .where('driverId', isEqualTo: currentDriverId)
+          .where('status', isEqualTo: 'accepted')
+          .snapshots(),
+      builder: (context, tripSnapshot) {
+        if (tripSnapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
+        if (tripSnapshot.hasError) {
+          return Center(child: Text('Error: ${tripSnapshot.error}'));
         }
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+        // ถ้าไม่มีงานที่ได้รับมอบหมาย ให้แสดงว่า "กำลังรองาน"
+        if (!tripSnapshot.hasData || tripSnapshot.data!.docs.isEmpty) {
           return const Center(
             child: Text('Waiting for a trip...',
                 style: TextStyle(fontSize: 18, color: Colors.grey)),
           );
         }
 
-        final requests = snapshot.data!.docs
+        // ถ้ามีงาน ให้จัดกลุ่มและแสดงผล
+        final requests = tripSnapshot.data!.docs
             .map((doc) => RideRequest.fromSnapshot(doc))
             .toList();
-        final groupedTrips = _groupTrips(requests);
+        final summary = _summarizeTrips(requests);
 
-        return ListView.builder(
-          itemCount: groupedTrips.length,
-          itemBuilder: (context, index) {
-            final trip = groupedTrips[index];
-            return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Trip #${index + 1}',
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Text('From: ${trip.pickupPointName}'),
-                    Text('To: ${trip.dropoffPointName}'),
-                    Text('Total Passengers: ${trip.totalPassengers}'),
-                  ],
+        return Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('My Assigned Trips',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    children: [
+                      _buildTripInfoColumn('PICKUP', summary.pickups),
+                      const VerticalDivider(width: 32, thickness: 1),
+                      _buildTripInfoColumn('DROP-OFF', summary.dropoffs),
+                    ],
+                  ),
                 ),
               ),
-            );
-          },
+            ],
+          ),
         );
       },
+    );
+  }
+
+  // ฟังก์ชันจัดกลุ่ม
+  TripSummary _summarizeTrips(List<RideRequest> requests) {
+    final Map<String, int> pickups = {};
+    final Map<String, int> dropoffs = {};
+
+    for (var request in requests) {
+      pickups.update(
+          request.pickupPointName, (value) => value + request.passengerCount,
+          ifAbsent: () => request.passengerCount);
+      dropoffs.update(
+          request.dropoffPointName, (value) => value + request.passengerCount,
+          ifAbsent: () => request.passengerCount);
+    }
+    return TripSummary(pickups: pickups, dropoffs: dropoffs);
+  }
+
+  // ฟังก์ชันสร้าง UI แต่ละฝั่ง
+  Widget _buildTripInfoColumn(String title, Map<String, int> locations) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.grey, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ...locations.entries.map((entry) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Column(
+                children: [
+                  Text(entry.key,
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Icon(Icons.person, color: Colors.grey),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${entry.value} passengers',
+                    style: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
     );
   }
 }
