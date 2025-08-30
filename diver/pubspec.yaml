@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  firebase_database: ^10.5.5
     
   simple_animations: ^5.0.2 
   # UI Icons

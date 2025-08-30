@@ -1,4 +1,4 @@
-// lib/main.dart (ฉบับสมบูรณ์ล่าสุด)
+// lib/main.dart
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -24,27 +24,6 @@ class Building {
   }
 }
 
-class RideRequest {
-  final String id;
-  final String status;
-  final String? driverId;
-  final String pickupPointId;
-
-  RideRequest(
-      {required this.id,
-      required this.status,
-      this.driverId,
-      required this.pickupPointId});
-}
-
-class Driver {
-  final String id;
-  final String name;
-  final LatLng position;
-
-  Driver({required this.id, required this.name, required this.position});
-}
-
 // --- Main ---
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,6 +36,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Smart Tram Request',
       theme: ThemeData(
         primarySwatch: Colors.green,
@@ -75,15 +55,12 @@ class RequestScreen extends StatefulWidget {
 }
 
 class _RequestScreenState extends State<RequestScreen> {
-  // --- State สำหรับฟอร์มเรียกรถ ---
+  // --- State ---
   List<Building> _buildings = [];
   Building? _selectedPickup;
   Building? _selectedDropoff;
   final int _passengerCount = 1;
   bool _isLoading = true;
-  String _statusMessage = '';
-
-  // --- State สำหรับการติดตาม (Tracking) ---
   String? _currentRequestId;
   StreamSubscription<DocumentSnapshot>? _driverSubscription;
   GoogleMapController? _mapController;
@@ -94,7 +71,7 @@ class _RequestScreenState extends State<RequestScreen> {
   String? _currentlyTrackedDriverId;
 
   static const CameraPosition _initialPosition = CameraPosition(
-    target: LatLng(13.7658086, 100.564992),
+    target: LatLng(18.7941, 98.9526),
     zoom: 15,
   );
 
@@ -156,8 +133,27 @@ class _RequestScreenState extends State<RequestScreen> {
       );
       return;
     }
+
     setState(() => _isLoading = true);
+
     try {
+      final availableDrivers = await FirebaseFirestore.instance
+          .collection('drivers')
+          .where('status', isEqualTo: 'online')
+          .where('isAvailable', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      if (availableDrivers.docs.isEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'No available drivers at the moment. Please try again later.')),
+        );
+        setState(() => _isLoading = false);
+        return;
+      }
+
       final response = await http.post(
         Uri.parse('$apiUrl/requests'),
         headers: {'Content-Type': 'application/json'},
@@ -170,6 +166,7 @@ class _RequestScreenState extends State<RequestScreen> {
           'passengerCount': _passengerCount,
         }),
       );
+
       if (response.statusCode == 201 && mounted) {
         final newRequestId = json.decode(response.body)['id'];
         setState(() {
@@ -178,16 +175,16 @@ class _RequestScreenState extends State<RequestScreen> {
         });
         _clearForm();
       } else {
-        setState(() {
-          _statusMessage = 'Failed to submit request.';
-          _isLoading = false;
-        });
+        if (mounted) setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to submit request.')),
+        );
       }
     } catch (e) {
-      setState(() {
-        _statusMessage = 'Error: ${e.toString()}';
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('An error occurred: $e')),
+      );
     }
   }
 
@@ -195,22 +192,48 @@ class _RequestScreenState extends State<RequestScreen> {
     setState(() {
       _selectedPickup = null;
       _selectedDropoff = null;
-      _statusMessage = '';
     });
+  }
+
+  Future<void> _cancelRequest() async {
+    if (_currentRequestId == null) return;
+    setState(() => _isLoading = true);
+    try {
+      final response = await http.post(
+        Uri.parse('$apiUrl/requests/$_currentRequestId/cancel'),
+      );
+      if (response.statusCode == 200 && mounted) {
+        setState(() {
+          _currentRequestId = null;
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Request cancelled.')),
+        );
+      } else {
+        if (mounted) setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to cancel request.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('An error occurred: $e')),
+      );
+    }
   }
 
   void _subscribeToDriverLocation(String driverId, String requestId) {
     if (_currentlyTrackedDriverId == driverId) return;
-
     _driverSubscription?.cancel();
     _currentlyTrackedDriverId = driverId;
-
     final driverRef =
         FirebaseFirestore.instance.collection('drivers').doc(driverId);
     _driverSubscription = driverRef.snapshots().listen((snapshot) {
       if (snapshot.exists && mounted) {
-        final data = snapshot.data() as Map<String, dynamic>;
-        final location = data['currentLocation'] as GeoPoint?;
+        final data = snapshot.data();
+        final location = data?['currentLocation'] as GeoPoint?;
         if (location != null) {
           _updateMarkerAndDistance(location, requestId);
         }
@@ -222,13 +245,11 @@ class _RequestScreenState extends State<RequestScreen> {
       GeoPoint driverLocationGeo, String requestId) async {
     final driverLatLng =
         LatLng(driverLocationGeo.latitude, driverLocationGeo.longitude);
-
     final requestDoc = await FirebaseFirestore.instance
         .collection('ride_requests')
         .doc(requestId)
         .get();
     if (!requestDoc.exists || !mounted) return;
-
     final requestData = requestDoc.data()!;
     final pickupPointId = requestData['pickupPointId'];
     final pickupDoc = await FirebaseFirestore.instance
@@ -240,13 +261,8 @@ class _RequestScreenState extends State<RequestScreen> {
     final pickupLocationGeo = pickupDoc.data()!['coordinates'] as GeoPoint;
     final pickupLatLng =
         LatLng(pickupLocationGeo.latitude, pickupLocationGeo.longitude);
-
-    final distanceInMeters = Geolocator.distanceBetween(
-      driverLatLng.latitude,
-      driverLatLng.longitude,
-      pickupLatLng.latitude,
-      pickupLatLng.longitude,
-    );
+    final distanceInMeters = Geolocator.distanceBetween(driverLatLng.latitude,
+        driverLatLng.longitude, pickupLatLng.latitude, pickupLatLng.longitude);
     final distanceInKm = distanceInMeters / 1000;
 
     final driverMarker = Marker(
@@ -256,7 +272,6 @@ class _RequestScreenState extends State<RequestScreen> {
       anchor: const Offset(0.5, 0.5),
       flat: true,
     );
-
     final pickupMarker = Marker(
       markerId: const MarkerId('pickup'),
       position: pickupLatLng,
@@ -272,7 +287,6 @@ class _RequestScreenState extends State<RequestScreen> {
       _distanceMessage =
           'Driver will arrive in ${distanceInKm.toStringAsFixed(2)} km';
     });
-
     _mapController?.animateCamera(CameraUpdate.newLatLng(driverLatLng));
   }
 
@@ -280,6 +294,35 @@ class _RequestScreenState extends State<RequestScreen> {
     if (_driverPosition != null && _mapController != null) {
       _mapController!.animateCamera(CameraUpdate.newLatLng(_driverPosition!));
     }
+  }
+
+  void _showCancellationDialog(String reason) {
+    if (!mounted || _currentRequestId == null) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Ride Cancelled"),
+          content:
+              Text("Your ride was cancelled by the driver.\nReason: $reason"),
+          actions: <Widget>[
+            TextButton(
+              child: const Text("OK"),
+              onPressed: () {
+                Navigator.of(context).pop();
+                setState(() {
+                  _currentRequestId = null;
+                  _markers.clear();
+                  _currentlyTrackedDriverId = null;
+                  _driverSubscription?.cancel();
+                });
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -321,16 +364,12 @@ class _RequestScreenState extends State<RequestScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Image.asset(
-                    'assets/images/logo.png',
-                    height: 100,
-                  ),
+                  Image.asset('assets/images/logo.png', height: 100),
                   const SizedBox(height: 16),
-                  const Text(
-                    'Request a Ride',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
+                  const Text('Request a Ride',
+                      textAlign: TextAlign.center,
+                      style:
+                          TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 24),
                   _buildDropdown(
                     hint: 'Pick-up',
@@ -350,8 +389,7 @@ class _RequestScreenState extends State<RequestScreen> {
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8.0),
-                      ),
+                          borderRadius: BorderRadius.circular(8.0)),
                     ),
                     onPressed: _submitRequest,
                     child: const Text('Find Driver',
@@ -377,11 +415,10 @@ class _RequestScreenState extends State<RequestScreen> {
     );
   }
 
-  Widget _buildDropdown({
-    required String hint,
-    required Building? value,
-    required ValueChanged<Building?> onChanged,
-  }) {
+  Widget _buildDropdown(
+      {required String hint,
+      required Building? value,
+      required ValueChanged<Building?> onChanged}) {
     return DropdownButtonFormField<Building>(
       value: value,
       decoration: InputDecoration(
@@ -400,7 +437,6 @@ class _RequestScreenState extends State<RequestScreen> {
     final now = DateTime.now();
     final currentHour = now.hour;
     final currentMinute = now.minute;
-
     final isMorning = currentHour >= 7 && currentHour <= 9;
     final isNoon = currentHour >= 11 && currentHour <= 13;
     final isEvening = (currentHour >= 15 && currentHour < 17) ||
@@ -425,22 +461,16 @@ class _RequestScreenState extends State<RequestScreen> {
       ),
       child: Column(
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: isActive ? Colors.white : Colors.black54,
-              fontSize: 12,
-            ),
-          ),
+          Text(title,
+              style: TextStyle(
+                  color: isActive ? Colors.white : Colors.black54,
+                  fontSize: 12)),
           const SizedBox(height: 2),
-          Text(
-            timeRange,
-            style: TextStyle(
-              color: isActive ? Colors.white : Colors.black54,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
-          ),
+          Text(timeRange,
+              style: TextStyle(
+                  color: isActive ? Colors.white : Colors.black54,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14)),
         ],
       ),
     );
@@ -453,22 +483,41 @@ class _RequestScreenState extends State<RequestScreen> {
           .doc(_currentRequestId)
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData || !snapshot.data!.exists) {
-          return const Center(child: Text('Waiting for request details...'));
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
         }
+        if (!snapshot.hasData || !snapshot.data!.exists) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _currentRequestId != null) {
+              setState(() => _currentRequestId = null);
+            }
+          });
+          return const SizedBox.shrink();
+        }
+
         final data = snapshot.data!.data() as Map<String, dynamic>;
         final status = data['status'] ?? 'unknown';
         final driverId = data['driverId'] as String?;
 
         switch (status) {
           case 'pending':
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 20),
-                  Text('Finding a driver...', style: TextStyle(fontSize: 18)),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 20),
+                  const Text('Finding a driver...',
+                      style: TextStyle(fontSize: 18)),
+                  const SizedBox(height: 20),
+                  OutlinedButton(
+                    onPressed: _cancelRequest,
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red)),
+                    child: const Text('Cancel Request'),
+                  ),
                 ],
               ),
             );
@@ -479,6 +528,16 @@ class _RequestScreenState extends State<RequestScreen> {
             }
             return const Center(
                 child: Text('Driver assigned, but ID is missing.'));
+
+          case 'cancelled_by_driver':
+            final reason = data['cancellationReason'] ?? 'No reason provided';
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _currentRequestId != null) {
+                _showCancellationDialog(reason);
+              }
+            });
+            return const Center(child: CircularProgressIndicator());
+
           case 'completed':
             _driverSubscription?.cancel();
             return Center(
@@ -552,10 +611,9 @@ class _RequestScreenState extends State<RequestScreen> {
   }
 }
 
-// --- LiveMapScreen (เหมือนเดิมทุกประการ) ---
+// --- LiveMapScreen ---
 class LiveMapScreen extends StatefulWidget {
   const LiveMapScreen({super.key});
-
   @override
   State<LiveMapScreen> createState() => _LiveMapScreenState();
 }
@@ -564,11 +622,10 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
   late StreamSubscription<QuerySnapshot> _driversSubscription;
   GoogleMapController? _mapController;
   final Set<Marker> _markers = {};
-  List<Driver> _onlineDrivers = [];
   BitmapDescriptor? _tramIcon;
 
   static const CameraPosition _initialPosition = CameraPosition(
-    target: LatLng(13.7658086, 100.564992),
+    target: LatLng(18.7941, 98.9526),
     zoom: 15,
   );
 
@@ -609,7 +666,6 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
 
   void _updateMarkersAndDriverList(List<QueryDocumentSnapshot> driverDocs) {
     final Set<Marker> updatedMarkers = {};
-    final List<Driver> updatedDrivers = [];
     for (var doc in driverDocs) {
       final data = doc.data() as Map<String, dynamic>;
       final location = data['currentLocation'] as GeoPoint?;
@@ -625,60 +681,24 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
             flat: true,
           ),
         );
-        updatedDrivers.add(Driver(
-            id: doc.id,
-            name: data['displayName'] ?? 'Driver',
-            position: position));
       }
     }
     if (mounted) {
       setState(() {
         _markers.clear();
         _markers.addAll(updatedMarkers);
-        _onlineDrivers = updatedDrivers;
       });
     }
-  }
-
-  void _goToDriver(LatLng position) {
-    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(position, 17));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Live Tram Map')),
-      body: Column(
-        children: [
-          Expanded(
-            child: GoogleMap(
-              initialCameraPosition: _initialPosition,
-              markers: _markers,
-              onMapCreated: (controller) => _mapController = controller,
-            ),
-          ),
-          Container(
-            height: 80,
-            color: Colors.white,
-            child: _onlineDrivers.isEmpty
-                ? const Center(child: Text('No drivers online.'))
-                : ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _onlineDrivers.length,
-                    itemBuilder: (context, index) {
-                      final driver = _onlineDrivers[index];
-                      return Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.directions_bus),
-                          label: Text(driver.name),
-                          onPressed: () => _goToDriver(driver.position),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
+      body: GoogleMap(
+        initialCameraPosition: _initialPosition,
+        markers: _markers,
+        onMapCreated: (controller) => _mapController = controller,
       ),
     );
   }

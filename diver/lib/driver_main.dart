@@ -7,12 +7,13 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'firebase_options.dart';
 
 // URL ของ API
 const String apiUrl = "https://api-nlcuxevdba-as.a.run.app";
 
-// ID ของคนขับ
+// ID ของคนขับ (สำหรับทดสอบ)
 const String currentDriverId = "oL5Ub0sKjwQdQ6xizvx9GZxFRau1";
 
 // --- Models ---
@@ -58,12 +59,12 @@ class DriverApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Driver App',
       theme: ThemeData(
         primarySwatch: Colors.deepPurple,
         visualDensity: VisualDensity.adaptivePlatformDensity,
         scaffoldBackgroundColor: const Color(0xFFF4F6F8),
-        // ✅ ใช้ CardThemeData ที่ถูกต้อง
         cardTheme: CardThemeData(
           elevation: 2,
           shape: RoundedRectangleBorder(
@@ -87,30 +88,69 @@ class _DriverScreenState extends State<DriverScreen> {
   Timer? _locationUpdateTimer;
   String _locationStatus = 'Initializing...';
 
+  void _updatePresence(bool isOnline) {
+    final dbRef =
+        FirebaseDatabase.instance.ref("driverStatus/$currentDriverId");
+
+    if (isOnline) {
+      dbRef.set({
+        'isOnline': true,
+        'last_seen': ServerValue.timestamp,
+      });
+      dbRef.onDisconnect().set({
+        'isOnline': false,
+        'last_seen': ServerValue.timestamp,
+      });
+    } else {
+      dbRef.set({
+        'isOnline': false,
+        'last_seen': ServerValue.timestamp,
+      });
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _startLocationUpdates();
+    _updatePresence(true);
   }
 
   @override
   void dispose() {
+    _updatePresence(false);
     _locationUpdateTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _startLocationUpdates() async {
-    // ... (โค้ดส่วนนี้เหมือนเดิม) ...
-    LocationPermission permission = await Geolocator.checkPermission();
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted)
+        setState(() => _locationStatus = 'Location services are disabled.');
+      return;
+    }
+
+    permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission != LocationPermission.whileInUse &&
-          permission != LocationPermission.always) {
+      if (permission == LocationPermission.denied) {
         if (mounted)
           setState(() => _locationStatus = 'Location permissions are denied.');
         return;
       }
     }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted)
+        setState(() =>
+            _locationStatus = 'Location permissions are permanently denied.');
+      return;
+    }
+
     _locationUpdateTimer =
         Timer.periodic(const Duration(seconds: 15), (timer) async {
       try {
@@ -129,19 +169,22 @@ class _DriverScreenState extends State<DriverScreen> {
               {'latitude': position.latitude, 'longitude': position.longitude}),
         );
       } catch (e) {
-        if (mounted)
+        if (mounted) {
           setState(() => _locationStatus = 'Could not get location.');
+        }
       }
     });
   }
 
-  Future<void> _updateDriverStatus(String status, {String? reason}) async {
+  Future<void> _updateDriverStatusInFirestore(String status,
+      {String? reason}) async {
     await FirebaseFirestore.instance
         .collection('drivers')
         .doc(currentDriverId)
         .update({
       'status': status,
       'pauseReason': reason ?? FieldValue.delete(),
+      'isAvailable': status == 'online',
     });
   }
 
@@ -154,8 +197,10 @@ class _DriverScreenState extends State<DriverScreen> {
           title: const Text('Pause Service'),
           content: TextField(
             controller: reasonController,
-            decoration:
-                const InputDecoration(hintText: 'Enter reason (optional)'),
+            decoration: const InputDecoration(
+              labelText: 'Reason',
+              hintText: 'e.g. Vehicle Breakdown',
+            ),
           ),
           actions: [
             TextButton(
@@ -164,7 +209,10 @@ class _DriverScreenState extends State<DriverScreen> {
             ),
             ElevatedButton(
               onPressed: () {
-                _updateDriverStatus('paused', reason: reasonController.text);
+                final reason = reasonController.text.isNotEmpty
+                    ? reasonController.text
+                    : "Service paused";
+                _updateDriverStatusInFirestore('paused', reason: reason);
                 Navigator.pop(context);
               },
               child: const Text('Confirm Pause'),
@@ -188,28 +236,30 @@ class _DriverScreenState extends State<DriverScreen> {
               body: Center(child: CircularProgressIndicator()));
         }
         final driverData = driverSnapshot.data!.data() as Map<String, dynamic>;
-        final driverStatus = driverData['status'] ?? 'offline';
+
+        final bool isTrulyOnline = (driverData['status'] == 'online') &&
+            (driverData['isAvailable'] == true);
 
         return Scaffold(
           appBar: AppBar(
-            title: Text(
-                driverStatus == 'online' ? 'Driver App' : 'Service Paused'),
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.black,
-            elevation: 0,
+            title: Text(isTrulyOnline ? 'Driver App' : 'Service Offline'),
+            backgroundColor: isTrulyOnline ? Colors.green : Colors.grey,
+            foregroundColor: Colors.white,
           ),
           floatingActionButtonLocation:
               FloatingActionButtonLocation.centerFloat,
-          floatingActionButton: driverStatus == 'online'
+          floatingActionButton: isTrulyOnline
               ? FloatingActionButton.extended(
                   onPressed: _showPauseDialog,
                   label: const Text('Pause Service'),
                   icon: const Icon(Icons.pause),
-                  backgroundColor: Colors.red,
+                  backgroundColor: Colors.orange,
                 )
               : FloatingActionButton.extended(
-                  onPressed: () => _updateDriverStatus('online'),
-                  label: const Text('Resume Service'),
+                  onPressed: () {
+                    _updateDriverStatusInFirestore('online');
+                  },
+                  label: const Text('Go Online'),
                   icon: const Icon(Icons.play_arrow),
                   backgroundColor: Colors.green,
                 ),
@@ -221,25 +271,22 @@ class _DriverScreenState extends State<DriverScreen> {
                   style: const TextStyle(color: Colors.grey)),
             ),
           ),
-          body: _buildDriverBody(driverStatus, driverData),
+          body: _buildDriverBody(isTrulyOnline, driverData),
         );
       },
     );
   }
 
-  // --- 🎯 แก้ไข: เปลี่ยน Logic การแสดงผลทั้งหมด ---
-  Widget _buildDriverBody(
-      String driverStatus, Map<String, dynamic> driverData) {
-    // ถ้าคนขับหยุดพัก ให้แสดงหน้าจอหยุดพัก
-    if (driverStatus == 'paused') {
+  Widget _buildDriverBody(bool isTrulyOnline, Map<String, dynamic> driverData) {
+    if (!isTrulyOnline) {
       final reason = driverData['pauseReason'] ?? '';
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.pause, size: 60, color: Colors.grey),
+            Icon(Icons.power_settings_new, size: 60, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            const Text('Service Paused',
+            const Text('Service Offline',
                 style: TextStyle(fontSize: 22, color: Colors.grey)),
             if (reason.isNotEmpty)
               Padding(
@@ -252,8 +299,6 @@ class _DriverScreenState extends State<DriverScreen> {
       );
     }
 
-    // ถ้าคนขับออนไลน์ ให้ไปดึงงานที่ได้รับมอบหมายมาแสดง
-    // ใช้ StreamBuilder อีกชั้นเพื่อดึงข้อมูลงานแบบ Real-time
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('ride_requests')
@@ -267,15 +312,20 @@ class _DriverScreenState extends State<DriverScreen> {
         if (tripSnapshot.hasError) {
           return Center(child: Text('Error: ${tripSnapshot.error}'));
         }
-        // ถ้าไม่มีงานที่ได้รับมอบหมาย ให้แสดงว่า "กำลังรองาน"
         if (!tripSnapshot.hasData || tripSnapshot.data!.docs.isEmpty) {
           return const Center(
-            child: Text('Waiting for a trip...',
-                style: TextStyle(fontSize: 18, color: Colors.grey)),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.trip_origin, size: 60, color: Colors.green),
+                SizedBox(height: 16),
+                Text('Waiting for a trip...',
+                    style: TextStyle(fontSize: 18, color: Colors.grey)),
+              ],
+            ),
           );
         }
 
-        // ถ้ามีงาน ให้จัดกลุ่มและแสดงผล
         final requests = tripSnapshot.data!.docs
             .map((doc) => RideRequest.fromSnapshot(doc))
             .toList();
@@ -308,7 +358,6 @@ class _DriverScreenState extends State<DriverScreen> {
     );
   }
 
-  // ฟังก์ชันจัดกลุ่ม
   TripSummary _summarizeTrips(List<RideRequest> requests) {
     final Map<String, int> pickups = {};
     final Map<String, int> dropoffs = {};
@@ -324,7 +373,6 @@ class _DriverScreenState extends State<DriverScreen> {
     return TripSummary(pickups: pickups, dropoffs: dropoffs);
   }
 
-  // ฟังก์ชันสร้าง UI แต่ละฝั่ง
   Widget _buildTripInfoColumn(String title, Map<String, int> locations) {
     return Expanded(
       child: Column(
@@ -339,6 +387,7 @@ class _DriverScreenState extends State<DriverScreen> {
               child: Column(
                 children: [
                   Text(entry.key,
+                      textAlign: TextAlign.center,
                       style: const TextStyle(
                           fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
