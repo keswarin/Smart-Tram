@@ -10,6 +10,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'firebase_options.dart';
+import 'gradient_background_animation.dart'; // 🎯 เพิ่ม import ไฟล์ที่คุณสร้างแยก
 
 // URL ของ API
 const String apiUrl = "https://api-nlcuxevdba-as.a.run.app";
@@ -22,6 +23,20 @@ class Building {
   factory Building.fromJson(Map<String, dynamic> json) {
     return Building(id: json['id'], name: json['name']);
   }
+}
+
+class _DriverInfo {
+  final String id;
+  final String name;
+  final LatLng position;
+  final String status;
+
+  _DriverInfo({
+    required this.id,
+    required this.name,
+    required this.position,
+    required this.status,
+  });
 }
 
 // --- Main ---
@@ -40,7 +55,6 @@ class MyApp extends StatelessWidget {
       title: 'Smart Tram Request',
       theme: ThemeData(
         primarySwatch: Colors.green,
-        scaffoldBackgroundColor: Colors.grey[200],
         fontFamily: 'Roboto',
       ),
       home: const RequestScreen(),
@@ -66,7 +80,7 @@ class _RequestScreenState extends State<RequestScreen> {
   GoogleMapController? _mapController;
   final Set<Marker> _markers = {};
   BitmapDescriptor? _tramIcon;
-  String _distanceMessage = 'Calculating distance...';
+  String _distanceMessage = 'กำลังคำนวณระยะทาง...';
   LatLng? _driverPosition;
   String? _currentlyTrackedDriverId;
 
@@ -123,13 +137,13 @@ class _RequestScreenState extends State<RequestScreen> {
   Future<void> _submitRequest() async {
     if (_selectedPickup == null || _selectedDropoff == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select both locations.')),
+        const SnackBar(content: Text('กรุณาเลือกทั้งจุดรับและจุดส่ง')),
       );
       return;
     }
     if (_selectedPickup!.id == _selectedDropoff!.id) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Locations cannot be the same.')),
+        const SnackBar(content: Text('จุดรับและจุดส่งต้องไม่ซ้ำกัน')),
       );
       return;
     }
@@ -147,8 +161,7 @@ class _RequestScreenState extends State<RequestScreen> {
       if (availableDrivers.docs.isEmpty && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text(
-                  'No available drivers at the moment. Please try again later.')),
+              content: Text('ขออภัย ไม่มีคนขับที่พร้อมให้บริการในขณะนี้')),
         );
         setState(() => _isLoading = false);
         return;
@@ -177,13 +190,13 @@ class _RequestScreenState extends State<RequestScreen> {
       } else {
         if (mounted) setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to submit request.')),
+          const SnackBar(content: Text('ไม่สามารถส่งคำขอได้')),
         );
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('An error occurred: $e')),
+        SnackBar(content: Text('เกิดข้อผิดพลาด: $e')),
       );
     }
   }
@@ -208,18 +221,18 @@ class _RequestScreenState extends State<RequestScreen> {
           _isLoading = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Request cancelled.')),
+          const SnackBar(content: Text('ยกเลิกคำขอแล้ว')),
         );
       } else {
         if (mounted) setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to cancel request.')),
+          const SnackBar(content: Text('ไม่สามารถยกเลิกคำขอได้')),
         );
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('An error occurred: $e')),
+        SnackBar(content: Text('เกิดข้อผิดพลาด: $e')),
       );
     }
   }
@@ -275,7 +288,7 @@ class _RequestScreenState extends State<RequestScreen> {
     final pickupMarker = Marker(
       markerId: const MarkerId('pickup'),
       position: pickupLatLng,
-      infoWindow: const InfoWindow(title: 'Pick-up Point'),
+      infoWindow: const InfoWindow(title: 'จุดรับ'),
       icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
     );
 
@@ -285,7 +298,7 @@ class _RequestScreenState extends State<RequestScreen> {
       _markers.add(driverMarker);
       _markers.add(pickupMarker);
       _distanceMessage =
-          'Driver will arrive in ${distanceInKm.toStringAsFixed(2)} km';
+          'คนขับจะมาถึงใน ${distanceInKm.toStringAsFixed(2)} กม.';
     });
     _mapController?.animateCamera(CameraUpdate.newLatLng(driverLatLng));
   }
@@ -303,12 +316,11 @@ class _RequestScreenState extends State<RequestScreen> {
       barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text("Ride Cancelled"),
-          content:
-              Text("Your ride was cancelled by the driver.\nReason: $reason"),
+          title: const Text("การเดินทางถูกยกเลิก"),
+          content: Text("การเดินทางของคุณถูกยกเลิกโดยคนขับ\nเหตุผล: $reason"),
           actions: <Widget>[
             TextButton(
-              child: const Text("OK"),
+              child: const Text("ตกลง"),
               onPressed: () {
                 Navigator.of(context).pop();
                 setState(() {
@@ -327,14 +339,20 @@ class _RequestScreenState extends State<RequestScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_currentRequestId == null ? 'Smart Tram' : 'Tracking Ride'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 1,
+    return GradientBackgroundAnimation(
+      // 🎯 ครอบ Scaffold ด้วย Widget ใหม่
+      child: Scaffold(
+        backgroundColor: Colors.transparent, // 🎯 ทำให้พื้นหลังโปร่งใส
+        appBar: AppBar(
+          title:
+              Text(_currentRequestId == null ? 'Smart Tram' : 'กำลังติดตามรถ'),
+          backgroundColor:
+              Colors.white.withOpacity(0.8), // ทำให้ AppBar กึ่งโปร่งใส
+          foregroundColor: Colors.black,
+          elevation: 0,
+        ),
+        body: _buildBody(),
       ),
-      body: _buildBody(),
     );
   }
 
@@ -342,10 +360,12 @@ class _RequestScreenState extends State<RequestScreen> {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_currentRequestId == null) {
-      return _buildRequestForm();
-    }
-    return _buildTrackingView();
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 500),
+      child: _currentRequestId == null
+          ? _buildRequestForm()
+          : _buildTrackingView(),
+    );
   }
 
   Widget _buildRequestForm() {
@@ -366,21 +386,23 @@ class _RequestScreenState extends State<RequestScreen> {
                 children: [
                   Image.asset('assets/images/logo.png', height: 100),
                   const SizedBox(height: 16),
-                  const Text('Request a Ride',
+                  const Text('เรียกรถราง',
                       textAlign: TextAlign.center,
                       style:
                           TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 24),
                   _buildDropdown(
-                    hint: 'Pick-up',
+                    hint: 'จุดรับ',
                     value: _selectedPickup,
                     onChanged: (val) => setState(() => _selectedPickup = val),
+                    icon: Icons.trip_origin,
                   ),
                   const SizedBox(height: 16),
                   _buildDropdown(
-                    hint: 'Drop-off',
+                    hint: 'จุดส่ง',
                     value: _selectedDropoff,
                     onChanged: (val) => setState(() => _selectedDropoff = val),
+                    icon: Icons.flag,
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(
@@ -392,7 +414,7 @@ class _RequestScreenState extends State<RequestScreen> {
                           borderRadius: BorderRadius.circular(8.0)),
                     ),
                     onPressed: _submitRequest,
-                    child: const Text('Find Driver',
+                    child: const Text('ค้นหาคนขับ',
                         style: TextStyle(fontSize: 16)),
                   ),
                   const SizedBox(height: 12),
@@ -401,7 +423,7 @@ class _RequestScreenState extends State<RequestScreen> {
                       Navigator.of(context).push(MaterialPageRoute(
                           builder: (context) => const LiveMapScreen()));
                     },
-                    child: const Text('View Map',
+                    child: const Text('ดูแผนที่',
                         style: TextStyle(color: Colors.black54)),
                   ),
                   const SizedBox(height: 16),
@@ -418,11 +440,13 @@ class _RequestScreenState extends State<RequestScreen> {
   Widget _buildDropdown(
       {required String hint,
       required Building? value,
-      required ValueChanged<Building?> onChanged}) {
+      required ValueChanged<Building?> onChanged,
+      required IconData icon}) {
     return DropdownButtonFormField<Building>(
       value: value,
       decoration: InputDecoration(
         labelText: hint,
+        prefixIcon: Icon(icon),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16.0),
       ),
@@ -508,7 +532,7 @@ class _RequestScreenState extends State<RequestScreen> {
                 children: [
                   const CircularProgressIndicator(),
                   const SizedBox(height: 20),
-                  const Text('Finding a driver...',
+                  const Text('กำลังค้นหาคนขับ...',
                       style: TextStyle(fontSize: 18)),
                   const SizedBox(height: 20),
                   OutlinedButton(
@@ -516,7 +540,7 @@ class _RequestScreenState extends State<RequestScreen> {
                     style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red,
                         side: const BorderSide(color: Colors.red)),
-                    child: const Text('Cancel Request'),
+                    child: const Text('ยกเลิกคำขอ'),
                   ),
                 ],
               ),
@@ -526,11 +550,10 @@ class _RequestScreenState extends State<RequestScreen> {
               _subscribeToDriverLocation(driverId, _currentRequestId!);
               return _buildDriverTrackingMap();
             }
-            return const Center(
-                child: Text('Driver assigned, but ID is missing.'));
+            return const Center(child: Text('คนขับรับงานแล้ว แต่หา ID ไม่เจอ'));
 
           case 'cancelled_by_driver':
-            final reason = data['cancellationReason'] ?? 'No reason provided';
+            final reason = data['cancellationReason'] ?? 'ไม่มีเหตุผล';
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted && _currentRequestId != null) {
                 _showCancellationDialog(reason);
@@ -546,7 +569,8 @@ class _RequestScreenState extends State<RequestScreen> {
                 children: [
                   const Icon(Icons.check_circle, color: Colors.green, size: 80),
                   const SizedBox(height: 20),
-                  const Text('Trip Completed!', style: TextStyle(fontSize: 24)),
+                  const Text('การเดินทางเสร็จสิ้น!',
+                      style: TextStyle(fontSize: 24)),
                   const SizedBox(height: 20),
                   ElevatedButton(
                     onPressed: () => setState(() {
@@ -554,13 +578,13 @@ class _RequestScreenState extends State<RequestScreen> {
                       _markers.clear();
                       _currentlyTrackedDriverId = null;
                     }),
-                    child: const Text('Done'),
+                    child: const Text('เสร็จสิ้น'),
                   )
                 ],
               ),
             );
           default:
-            return Center(child: Text('Unknown status: $status'));
+            return Center(child: Text('สถานะไม่รู้จัก: $status'));
         }
       },
     );
@@ -622,6 +646,7 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
   late StreamSubscription<QuerySnapshot> _driversSubscription;
   GoogleMapController? _mapController;
   final Set<Marker> _markers = {};
+  List<_DriverInfo> _allDrivers = [];
   BitmapDescriptor? _tramIcon;
 
   static const CameraPosition _initialPosition = CameraPosition(
@@ -656,9 +681,7 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
   }
 
   void _subscribeToAllDrivers() {
-    final driversQuery = FirebaseFirestore.instance
-        .collection('drivers')
-        .where('status', isEqualTo: 'online');
+    final driversQuery = FirebaseFirestore.instance.collection('drivers');
     _driversSubscription = driversQuery.snapshots().listen((snapshot) {
       if (mounted) _updateMarkersAndDriverList(snapshot.docs);
     });
@@ -666,39 +689,105 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
 
   void _updateMarkersAndDriverList(List<QueryDocumentSnapshot> driverDocs) {
     final Set<Marker> updatedMarkers = {};
+    final List<_DriverInfo> updatedDrivers = [];
+
     for (var doc in driverDocs) {
       final data = doc.data() as Map<String, dynamic>;
       final location = data['currentLocation'] as GeoPoint?;
+      final status = data['status'] as String? ?? 'offline';
+
+      LatLng position = const LatLng(0, 0);
       if (location != null) {
-        final position = LatLng(location.latitude, location.longitude);
+        position = LatLng(location.latitude, location.longitude);
+      }
+
+      if (status == 'online' && location != null) {
         updatedMarkers.add(
           Marker(
             markerId: MarkerId(doc.id),
             position: position,
             icon: _tramIcon ?? BitmapDescriptor.defaultMarker,
-            infoWindow: InfoWindow(title: data['displayName'] ?? 'Driver'),
+            infoWindow: InfoWindow(title: data['displayName'] ?? 'คนขับ'),
             anchor: const Offset(0.5, 0.5),
             flat: true,
           ),
         );
       }
+
+      updatedDrivers.add(_DriverInfo(
+        id: doc.id,
+        name: data['displayName'] ?? 'คนขับ',
+        position: position,
+        status: status,
+      ));
     }
+
     if (mounted) {
       setState(() {
         _markers.clear();
         _markers.addAll(updatedMarkers);
+        _allDrivers = updatedDrivers;
       });
     }
+  }
+
+  void _goToDriver(LatLng position) {
+    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(position, 17));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Live Tram Map')),
-      body: GoogleMap(
-        initialCameraPosition: _initialPosition,
-        markers: _markers,
-        onMapCreated: (controller) => _mapController = controller,
+      appBar: AppBar(title: const Text('แผนที่รถราง (Real-time)')),
+      body: Column(
+        children: [
+          Expanded(
+            child: GoogleMap(
+              initialCameraPosition: _initialPosition,
+              markers: _markers,
+              onMapCreated: (controller) => _mapController = controller,
+            ),
+          ),
+          Container(
+            height: 80,
+            color: Colors.white,
+            child: _allDrivers.isEmpty
+                ? const Center(child: Text('ไม่พบข้อมูลคนขับในระบบ'))
+                : ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _allDrivers.length,
+                    itemBuilder: (context, index) {
+                      final driver = _allDrivers[index];
+                      final bool isOnline = driver.status == 'online';
+
+                      return Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: ElevatedButton.icon(
+                          icon: Icon(
+                            Icons.directions_bus,
+                            color: isOnline ? Colors.white : Colors.grey,
+                          ),
+                          label: Text(
+                            driver.name,
+                            style: TextStyle(
+                              color: isOnline ? Colors.white : Colors.grey,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isOnline
+                                ? Theme.of(context).primaryColor
+                                : Colors.grey[300],
+                            disabledBackgroundColor: Colors.grey[300],
+                          ),
+                          onPressed: isOnline
+                              ? () => _goToDriver(driver.position)
+                              : null,
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }

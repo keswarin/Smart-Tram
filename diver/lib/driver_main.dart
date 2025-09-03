@@ -194,30 +194,30 @@ class _DriverScreenState extends State<DriverScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Pause Service'),
+          title: const Text('หยุดพักบริการ'),
           content: TextField(
             controller: reasonController,
             autofocus: true,
             decoration: const InputDecoration(
-              labelText: 'Reason',
-              hintText: 'e.g. Vehicle Breakdown',
+              labelText: 'เหตุผล',
+              hintText: 'เช่น รถเสีย, พักส่วนตัว',
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
+              child: const Text('ยกเลิก'),
             ),
             ElevatedButton(
               onPressed: () {
                 final reason = reasonController.text.isNotEmpty
                     ? reasonController.text
-                    : "Service paused";
+                    : "หยุดบริการชั่วคราว";
 
                 _updateDriverStatusInFirestore('paused', reason: reason);
                 Navigator.pop(context);
               },
-              child: const Text('Confirm Pause'),
+              child: const Text('ยืนยัน'),
             ),
           ],
         );
@@ -244,7 +244,7 @@ class _DriverScreenState extends State<DriverScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: Text(isTrulyOnline ? 'Driver App' : 'Service Offline'),
+            title: Text(isTrulyOnline ? 'แอปคนขับ' : 'ปิดให้บริการ'),
             backgroundColor: isTrulyOnline ? Colors.green : Colors.grey,
             foregroundColor: Colors.white,
           ),
@@ -253,7 +253,7 @@ class _DriverScreenState extends State<DriverScreen> {
           floatingActionButton: isTrulyOnline
               ? FloatingActionButton.extended(
                   onPressed: _showPauseDialog,
-                  label: const Text('Pause Service'),
+                  label: const Text('หยุดพักบริการ'),
                   icon: const Icon(Icons.pause),
                   backgroundColor: Colors.orange,
                 )
@@ -261,7 +261,7 @@ class _DriverScreenState extends State<DriverScreen> {
                   onPressed: () {
                     _updateDriverStatusInFirestore('online');
                   },
-                  label: const Text('Go Online'),
+                  label: const Text('ออนไลน์'),
                   icon: const Icon(Icons.play_arrow),
                   backgroundColor: Colors.green,
                 ),
@@ -288,12 +288,12 @@ class _DriverScreenState extends State<DriverScreen> {
           children: [
             Icon(Icons.power_settings_new, size: 60, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            const Text('Service Offline',
+            const Text('ปิดให้บริการ',
                 style: TextStyle(fontSize: 22, color: Colors.grey)),
             if (reason.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8.0),
-                child: Text('Reason: $reason',
+                child: Text('เหตุผล: $reason',
                     style: const TextStyle(fontSize: 16, color: Colors.grey)),
               ),
           ],
@@ -321,7 +321,7 @@ class _DriverScreenState extends State<DriverScreen> {
               children: [
                 Icon(Icons.trip_origin, size: 60, color: Colors.green),
                 SizedBox(height: 16),
-                Text('Waiting for a trip...',
+                Text('กำลังรอรับงาน...',
                     style: TextStyle(fontSize: 18, color: Colors.grey)),
               ],
             ),
@@ -338,7 +338,7 @@ class _DriverScreenState extends State<DriverScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('My Assigned Trips',
+              const Text('รายการงานของฉัน',
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               Card(
@@ -346,9 +346,9 @@ class _DriverScreenState extends State<DriverScreen> {
                   padding: const EdgeInsets.all(16.0),
                   child: Row(
                     children: [
-                      _buildTripInfoColumn('PICKUP', summary.pickups),
+                      _buildTripInfoColumn('จุดรับ', summary.pickups),
                       const VerticalDivider(width: 32, thickness: 1),
-                      _buildTripInfoColumn('DROP-OFF', summary.dropoffs),
+                      _buildTripInfoColumn('จุดส่ง', summary.dropoffs),
                     ],
                   ),
                 ),
