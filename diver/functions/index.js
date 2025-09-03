@@ -250,6 +250,66 @@ exports.onDriverStatusChanged = onValueWritten({
   }
 });
 
+// 🎯 ฟังก์ชันใหม่สำหรับปิดงานอัตโนมัติ
+exports.autoCompleteTrip = onDocumentUpdated({
+  document: "drivers/{driverId}",
+  region: "asia-southeast1",
+}, async (event) => {
+  const change = event.data;
+  if (!change) return;
+
+  const newData = change.after.data();
+  const oldData = change.before.data();
+  const driverId = event.params.driverId;
+
+  if (!oldData.currentLocation || !newData.currentLocation ||
+      (newData.currentLocation.latitude === oldData.currentLocation.latitude &&
+       newData.currentLocation.longitude === oldData.currentLocation.longitude)) {
+    return;
+  }
+
+  const requestsRef = db.collection("ride_requests");
+  const snapshot = await requestsRef.where("driverId", "==", driverId).where("status", "==", "accepted").get();
+
+  if (snapshot.empty) return;
+
+  for (const rideRequestDoc of snapshot.docs) {
+    const rideRequestData = rideRequestDoc.data();
+    const dropoffPointId = rideRequestData.dropoffPointId;
+
+    const dropoffPointDoc = await db.collection("pickup_points").doc(dropoffPointId).get();
+    if (!dropoffPointDoc.exists) continue;
+
+    const dropoffLocation = dropoffPointDoc.data().coordinates;
+    const driverLocation = newData.currentLocation;
+    
+    const distanceInMeters = calculateDistance(
+        driverLocation.latitude, driverLocation.longitude, 
+        dropoffLocation.latitude, dropoffLocation.longitude
+    ) * 1000;
+
+    if (distanceInMeters <= 50) {
+      logger.log(`Trip ${rideRequestDoc.id} is complete. Distance: ${distanceInMeters}m.`);
+      const passengerCount = rideRequestData.passengerCount || 1;
+
+      const driverDoc = await db.collection("drivers").doc(driverId).get();
+      if (!driverDoc.exists) continue;
+      const driverData = driverDoc.data();
+      const newPassengerCount = driverData.currentPassengers - passengerCount;
+
+      await db.collection("drivers").doc(driverId).update({
+        currentPassengers: admin.firestore.FieldValue.increment(-passengerCount),
+        isAvailable: newPassengerCount < driverData.capacity,
+      });
+
+      await rideRequestDoc.ref.update({
+        status: "completed",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  }
+});
+
 
 // --- Helper Functions ---
 function calculateDistance(lat1, lon1, lat2, lon2) {

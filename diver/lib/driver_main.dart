@@ -197,6 +197,7 @@ class _DriverScreenState extends State<DriverScreen> {
           title: const Text('Pause Service'),
           content: TextField(
             controller: reasonController,
+            autofocus: true,
             decoration: const InputDecoration(
               labelText: 'Reason',
               hintText: 'e.g. Vehicle Breakdown',
@@ -212,6 +213,7 @@ class _DriverScreenState extends State<DriverScreen> {
                 final reason = reasonController.text.isNotEmpty
                     ? reasonController.text
                     : "Service paused";
+
                 _updateDriverStatusInFirestore('paused', reason: reason);
                 Navigator.pop(context);
               },
