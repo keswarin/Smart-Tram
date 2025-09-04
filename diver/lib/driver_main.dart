@@ -9,12 +9,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'firebase_options.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'auth_wrapper.dart'; // Import AuthWrapper
 
 // URL ของ API
 const String apiUrl = "https://api-nlcuxevdba-as.a.run.app";
-
-// ID ของคนขับ (สำหรับทดสอบ)
-const String currentDriverId = "oL5Ub0sKjwQdQ6xizvx9GZxFRau1";
 
 // --- Models ---
 class RideRequest {
@@ -72,13 +71,14 @@ class DriverApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const DriverScreen(),
+      home: const AuthWrapper(), // 🎯 เปลี่ยน home เป็น AuthWrapper
     );
   }
 }
 
 class DriverScreen extends StatefulWidget {
-  const DriverScreen({super.key});
+  final String driverId; // 🎯 รับค่า driverId ที่มาจากการล็อกอิน
+  const DriverScreen({super.key, required this.driverId});
 
   @override
   State<DriverScreen> createState() => _DriverScreenState();
@@ -89,8 +89,9 @@ class _DriverScreenState extends State<DriverScreen> {
   String _locationStatus = 'Initializing...';
 
   void _updatePresence(bool isOnline) {
+    // 🎯 ใช้ widget.driverId แทน
     final dbRef =
-        FirebaseDatabase.instance.ref("driverStatus/$currentDriverId");
+        FirebaseDatabase.instance.ref("driverStatus/${widget.driverId}");
 
     if (isOnline) {
       dbRef.set({
@@ -163,7 +164,8 @@ class _DriverScreenState extends State<DriverScreen> {
           });
         }
         await http.put(
-          Uri.parse('$apiUrl/drivers/$currentDriverId/location'),
+          // 🎯 ใช้ widget.driverId แทน
+          Uri.parse('$apiUrl/drivers/${widget.driverId}/location'),
           headers: {'Content-Type': 'application/json'},
           body: json.encode(
               {'latitude': position.latitude, 'longitude': position.longitude}),
@@ -180,7 +182,7 @@ class _DriverScreenState extends State<DriverScreen> {
       {String? reason}) async {
     await FirebaseFirestore.instance
         .collection('drivers')
-        .doc(currentDriverId)
+        .doc(widget.driverId) // 🎯 ใช้ widget.driverId แทน
         .update({
       'status': status,
       'pauseReason': reason ?? FieldValue.delete(),
@@ -225,17 +227,44 @@ class _DriverScreenState extends State<DriverScreen> {
     );
   }
 
+  Future<void> _logout() async {
+    await FirebaseAuth.instance.signOut();
+    // AuthWrapper จะจัดการการเปลี่ยนหน้าไปหน้า Login เอง
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
           .collection('drivers')
-          .doc(currentDriverId)
+          .doc(widget.driverId) // 🎯 ใช้ widget.driverId แทน
           .snapshots(),
       builder: (context, driverSnapshot) {
         if (!driverSnapshot.hasData) {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
+        }
+        if (!driverSnapshot.data!.exists) {
+          // กรณีที่หาข้อมูลคนขับใน Firestore ไม่เจอ (อาจจะยังไม่ได้สร้าง)
+          return Scaffold(
+            appBar: AppBar(title: const Text('Error')),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text('ไม่พบข้อมูลคนขับในระบบ'),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: _logout,
+                      child: const Text('กลับไปหน้า Login'),
+                    )
+                  ],
+                ),
+              ),
+            ),
+          );
         }
         final driverData = driverSnapshot.data!.data() as Map<String, dynamic>;
 
@@ -247,6 +276,13 @@ class _DriverScreenState extends State<DriverScreen> {
             title: Text(isTrulyOnline ? 'แอปคนขับ' : 'ปิดให้บริการ'),
             backgroundColor: isTrulyOnline ? Colors.green : Colors.grey,
             foregroundColor: Colors.white,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.logout),
+                onPressed: _logout,
+                tooltip: 'Logout',
+              )
+            ],
           ),
           floatingActionButtonLocation:
               FloatingActionButtonLocation.centerFloat,
@@ -304,7 +340,8 @@ class _DriverScreenState extends State<DriverScreen> {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('ride_requests')
-          .where('driverId', isEqualTo: currentDriverId)
+          .where('driverId',
+              isEqualTo: widget.driverId) // 🎯 ใช้ widget.driverId แทน
           .where('status', isEqualTo: 'accepted')
           .snapshots(),
       builder: (context, tripSnapshot) {

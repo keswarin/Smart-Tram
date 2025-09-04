@@ -9,8 +9,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'auth_wrapper.dart'; // 🎯 เพิ่ม import
 import 'firebase_options.dart';
-import 'gradient_background_animation.dart'; // 🎯 เพิ่ม import ไฟล์ที่คุณสร้างแยก
+import 'gradient_background_animation.dart';
 
 // URL ของ API
 const String apiUrl = "https://api-nlcuxevdba-as.a.run.app";
@@ -57,7 +58,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.green,
         fontFamily: 'Roboto',
       ),
-      home: const RequestScreen(),
+      home: const AuthWrapper(), // 🎯 เปลี่ยน home เป็น AuthWrapper
     );
   }
 }
@@ -171,7 +172,8 @@ class _RequestScreenState extends State<RequestScreen> {
         Uri.parse('$apiUrl/requests'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
-          'userId': 'test_user_id',
+          'userId':
+              'test_user_id', // Should be replaced with actual user ID after login
           'pickupBuildingId': _selectedPickup!.id,
           'dropoffBuildingId': _selectedDropoff!.id,
           'pickupPointName': _selectedPickup!.name,
@@ -340,14 +342,12 @@ class _RequestScreenState extends State<RequestScreen> {
   @override
   Widget build(BuildContext context) {
     return GradientBackgroundAnimation(
-      // 🎯 ครอบ Scaffold ด้วย Widget ใหม่
       child: Scaffold(
-        backgroundColor: Colors.transparent, // 🎯 ทำให้พื้นหลังโปร่งใส
+        backgroundColor: Colors.transparent,
         appBar: AppBar(
           title:
               Text(_currentRequestId == null ? 'Smart Tram' : 'กำลังติดตามรถ'),
-          backgroundColor:
-              Colors.white.withOpacity(0.8), // ทำให้ AppBar กึ่งโปร่งใส
+          backgroundColor: Colors.white.withOpacity(0.8),
           foregroundColor: Colors.black,
           elevation: 0,
         ),
