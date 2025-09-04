@@ -1,33 +1,65 @@
 // lib/role_redirector.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'main.dart'; // แอปผู้ใช้
-import 'driver_main.dart'; // แอปคนขับ
+import 'driver_main.dart';
+import 'main.dart'; // สำหรับฝั่งผู้ใช้ (ถ้าไฟล์ main.dart คือหน้า user)
 
 class RoleRedirector extends StatelessWidget {
-  final String uid;
-  const RoleRedirector({super.key, required this.uid});
+  const RoleRedirector({super.key});
+
+  Future<String?> _getUserRole(String uid) async {
+    final firestore = FirebaseFirestore.instance;
+
+    // 🔹 ตรวจสอบใน collection 'drivers'
+    final driverDoc = await firestore.collection('drivers').doc(uid).get();
+    if (driverDoc.exists) {
+      return "driver";
+    }
+
+    // 🔹 ตรวจสอบใน collection 'users'
+    final userDoc = await firestore.collection('users').doc(uid).get();
+    if (userDoc.exists) {
+      return "user";
+    }
+
+    return null; // ถ้าไม่พบ
+  }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance.collection('drivers').doc(uid).get(),
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return const Scaffold(
+        body: Center(child: Text("ยังไม่ได้เข้าสู่ระบบ")),
+      );
+    }
+
+    return FutureBuilder<String?>(
+      future: _getUserRole(user.uid),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
         }
-        if (snapshot.hasError) {
+
+        if (!snapshot.hasData || snapshot.data == null) {
           return const Scaffold(
-              body: Center(child: Text("Something went wrong")));
+            body: Center(
+              child: Text("ไม่พบข้อมูลผู้ใช้ กรุณาติดต่อผู้ดูแลระบบ"),
+            ),
+          );
         }
 
-        if (snapshot.data != null && snapshot.data!.exists) {
-          // ถ้า UID นี้มีข้อมูลใน collection 'drivers' ให้ไปหน้าคนขับ
-          return DriverScreen(driverId: uid);
+        final role = snapshot.data;
+
+        if (role == "driver") {
+          // 🔹 ไปหน้า Driver
+          return DriverScreen(driverId: user.uid);
         } else {
-          // ถ้าไม่เจอ ให้ไปหน้าผู้ใช้ทั่วไป
-          return RequestScreen();
+          // 🔹 ไปหน้า User (เรียก main.dart ที่เป็นหน้าเลือกขึ้นรถ)
+          return const RequestScreen();
         }
       },
     );

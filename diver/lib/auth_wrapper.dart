@@ -1,8 +1,9 @@
 // lib/auth_wrapper.dart
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'login_screen.dart';
 import 'role_redirector.dart';
+import 'login_signup_screen.dart';
+import 'verify_email_screen.dart';
 
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
@@ -16,10 +17,18 @@ class AuthWrapper extends StatelessWidget {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
         }
-        if (snapshot.hasData) {
-          return RoleRedirector(uid: snapshot.data!.uid);
+
+        final user = snapshot.data;
+
+        if (user == null) {
+          return const LoginSignupScreen();
         }
-        return const LoginSignupScreen();
+
+        if (!user.emailVerified) {
+          return const VerifyEmailScreen();
+        }
+
+        return const RoleRedirector();
       },
     );
   }

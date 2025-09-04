@@ -19,27 +19,42 @@ class _LoginSignupScreenState extends State<LoginSignupScreen> {
   String? _errorMessage;
   bool _isLoading = false;
 
-  void _submitForm() async {
+  Future<void> _submitForm() async {
     if (_formKey.currentState!.validate()) {
       setState(() {
         _isLoading = true;
         _errorMessage = null;
       });
+
       try {
         if (_isLogin) {
-          // --- Logic การล็อกอิน ---
-          await _auth.signInWithEmailAndPassword(
+          // 🔹 เข้าสู่ระบบ
+          final userCredential = await _auth.signInWithEmailAndPassword(
             email: _emailController.text.trim(),
             password: _passwordController.text.trim(),
           );
+
+          if (userCredential.user != null &&
+              userCredential.user!.emailVerified) {
+            // ✅ ยืนยันแล้ว -> ระบบจะไปต่อเองผ่าน AuthWrapper
+          } else {
+            // ❌ ยังไม่ยืนยัน
+            await _auth.signOut();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ")),
+            );
+          }
         } else {
-          // --- Logic การสมัครสมาชิก ---
+          // 🔹 สมัครสมาชิก
           final newUserCredential = await _auth.createUserWithEmailAndPassword(
             email: _emailController.text.trim(),
             password: _passwordController.text.trim(),
           );
 
-          // สร้างข้อมูลผู้ใช้ใหม่ใน Firestore collection 'users'
+          // ส่งอีเมลยืนยัน
+          await newUserCredential.user?.sendEmailVerification();
+
+          // สร้างข้อมูลผู้ใช้ใหม่ใน Firestore
           await FirebaseFirestore.instance
               .collection('users')
               .doc(newUserCredential.user!.uid)
@@ -47,9 +62,14 @@ class _LoginSignupScreenState extends State<LoginSignupScreen> {
             'email': newUserCredential.user!.email,
             'createdAt': FieldValue.serverTimestamp(),
           });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  "ส่งอีเมลยืนยันไปที่ ${_emailController.text} แล้ว กรุณายืนยันก่อนเข้าสู่ระบบ"),
+            ),
+          );
         }
-        // เมื่อสำเร็จ AuthGate จะจัดการเปลี่ยนหน้าเอง
-        // ไม่ต้องมี if (mounted) return; ที่นี่
       } on FirebaseAuthException catch (e) {
         setState(() {
           _errorMessage = e.message;
@@ -61,6 +81,22 @@ class _LoginSignupScreenState extends State<LoginSignupScreen> {
           });
         }
       }
+    }
+  }
+
+  Future<void> _resendVerificationEmail() async {
+    try {
+      final user = _auth.currentUser;
+      if (user != null && !user.emailVerified) {
+        await user.sendEmailVerification();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("ส่งอีเมลยืนยันใหม่แล้ว")),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("เกิดข้อผิดพลาด: $e")),
+      );
     }
   }
 
@@ -81,26 +117,26 @@ class _LoginSignupScreenState extends State<LoginSignupScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _isLogin ? 'Login' : 'Sign Up',
+                      _isLogin ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก',
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
                     const SizedBox(height: 24),
                     TextFormField(
                       controller: _emailController,
                       decoration: const InputDecoration(
-                          labelText: 'Email', border: OutlineInputBorder()),
+                          labelText: 'อีเมล', border: OutlineInputBorder()),
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) =>
-                          value!.isEmpty ? 'Please enter an email' : null,
+                          value!.isEmpty ? 'กรุณากรอกอีเมล' : null,
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _passwordController,
                       decoration: const InputDecoration(
-                          labelText: 'Password', border: OutlineInputBorder()),
+                          labelText: 'รหัสผ่าน', border: OutlineInputBorder()),
                       obscureText: true,
                       validator: (value) => value!.length < 6
-                          ? 'Password must be at least 6 characters'
+                          ? 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'
                           : null,
                     ),
                     if (_errorMessage != null)
@@ -117,7 +153,8 @@ class _LoginSignupScreenState extends State<LoginSignupScreen> {
                               minimumSize: const Size(double.infinity, 50),
                             ),
                             onPressed: _submitForm,
-                            child: Text(_isLogin ? 'Login' : 'Sign Up'),
+                            child:
+                                Text(_isLogin ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก'),
                           ),
                     TextButton(
                       onPressed: () {
@@ -127,9 +164,14 @@ class _LoginSignupScreenState extends State<LoginSignupScreen> {
                         });
                       },
                       child: Text(_isLogin
-                          ? 'Create an account'
-                          : 'I already have an account'),
-                    )
+                          ? 'สร้างบัญชีใหม่'
+                          : 'ฉันมีบัญชีแล้ว เข้าสู่ระบบ'),
+                    ),
+                    if (_isLogin)
+                      TextButton(
+                        onPressed: _resendVerificationEmail,
+                        child: const Text("ส่งอีเมลยืนยันใหม่"),
+                      )
                   ],
                 ),
               ),
