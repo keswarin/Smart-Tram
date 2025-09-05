@@ -11,6 +11,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  cloud_functions: ^4.6.8  # สำหรับเรียกใช้ OTP verification
+
+  # (Optional) สำหรับทำ Loading Indicator สวยๆ
+  flutter_spinkit: ^5.2.1
 
   # --- Firebase Packages ---
   firebase_core: ^2.30.1
@@ -19,6 +23,7 @@ dependencies:
   firebase_messaging: ^14.9.1
   firebase_database: ^10.5.5
   cloud_functions: ^4.3.0
+  
 
   # --- Location and Maps ---
   geolocator: ^11.1.0
