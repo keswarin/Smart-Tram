@@ -1,4 +1,4 @@
-// lib/user_main.dart
+// lib/user_main.dart (Final Version)
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -11,8 +11,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'services/auth_service.dart';
 import 'gradient_background_animation.dart';
 
-// URL ของ API
-const String apiUrl = "https://api-nlcuxevdba-as.a.run.app";
+const String apiUrl =
+    "https://asia-southeast1-shuttle-tracking-7f71a.cloudfunctions.net";
 
 // --- Models ---
 class Building {
@@ -29,12 +29,14 @@ class _DriverInfo {
   final String name;
   final LatLng position;
   final String status;
+  final bool isOnline;
 
   _DriverInfo({
     required this.id,
     required this.name,
     required this.position,
     required this.status,
+    required this.isOnline,
   });
 }
 
@@ -47,8 +49,6 @@ class UserMain extends StatefulWidget {
 class _UserMainState extends State<UserMain> {
   // --- State ---
   List<Building> _buildings = [];
-  Building? _selectedPickup;
-  Building? _selectedDropoff;
   final int _passengerCount = 1;
   bool _isLoading = true;
   String? _currentRequestId;
@@ -56,13 +56,16 @@ class _UserMainState extends State<UserMain> {
   GoogleMapController? _mapController;
   final Set<Marker> _markers = {};
   BitmapDescriptor? _tramIcon;
-  String _distanceMessage = 'กำลังคำนวณระยะทาง...';
+  String _distanceMessage = 'กำลังค้นหาคนขับ...';
   LatLng? _driverPosition;
   String? _currentlyTrackedDriverId;
   User? _currentUser;
 
+  String? selectedPickupId;
+  String? selectedDropoffId;
+
   static const CameraPosition _initialPosition = CameraPosition(
-    target: LatLng(18.7941, 98.9526),
+    target: LatLng(18.7941, 98.9526), // Central point for the map
     zoom: 15,
   );
 
@@ -95,31 +98,30 @@ class _UserMainState extends State<UserMain> {
 
   Future<void> _fetchBuildings() async {
     try {
-      final response = await http.get(Uri.parse('$apiUrl/buildings'));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        if (mounted) {
-          setState(() {
-            _buildings = data.map((json) => Building.fromJson(json)).toList();
-            _isLoading = false;
-          });
-        }
-      } else {
-        if (mounted) setState(() => _isLoading = false);
+      final snapshot =
+          await FirebaseFirestore.instance.collection('pickup_points').get();
+      if (mounted) {
+        setState(() {
+          _buildings = snapshot.docs
+              .map((doc) => Building(id: doc.id, name: doc['name']))
+              .toList();
+          _isLoading = false;
+        });
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
+      print("Error fetching buildings: $e");
     }
   }
 
   Future<void> _submitRequest() async {
-    if (_selectedPickup == null || _selectedDropoff == null) {
+    if (selectedPickupId == null || selectedDropoffId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('กรุณาเลือกทั้งจุดรับและจุดส่ง')),
       );
       return;
     }
-    if (_selectedPickup!.id == _selectedDropoff!.id) {
+    if (selectedPickupId == selectedDropoffId) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('จุดรับและจุดส่งต้องไม่ซ้ำกัน')),
       );
@@ -135,31 +137,20 @@ class _UserMainState extends State<UserMain> {
     setState(() => _isLoading = true);
 
     try {
-      final availableDrivers = await FirebaseFirestore.instance
-          .collection('drivers')
-          .where('status', isEqualTo: 'online')
-          .where('isAvailable', isEqualTo: true)
-          .limit(1)
-          .get();
-
-      if (availableDrivers.docs.isEmpty && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('ขออภัย ไม่มีคนขับที่พร้อมให้บริการในขณะนี้')),
-        );
-        setState(() => _isLoading = false);
-        return;
-      }
+      final pickupBuilding =
+          _buildings.firstWhere((b) => b.id == selectedPickupId);
+      final dropoffBuilding =
+          _buildings.firstWhere((b) => b.id == selectedDropoffId);
 
       final response = await http.post(
-        Uri.parse('$apiUrl/requests'),
+        Uri.parse('$apiUrl/createRequest'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'userId': _currentUser!.uid,
-          'pickupBuildingId': _selectedPickup!.id,
-          'dropoffBuildingId': _selectedDropoff!.id,
-          'pickupPointName': _selectedPickup!.name,
-          'dropoffPointName': _selectedDropoff!.name,
+          'pickupBuildingId': pickupBuilding.id,
+          'dropoffBuildingId': dropoffBuilding.id,
+          'pickupPointName': pickupBuilding.name,
+          'dropoffPointName': dropoffBuilding.name,
           'passengerCount': _passengerCount,
         }),
       );
@@ -174,7 +165,7 @@ class _UserMainState extends State<UserMain> {
       } else {
         if (mounted) setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ไม่สามารถส่งคำขอได้')),
+          SnackBar(content: Text('ไม่สามารถส่งคำขอได้: ${response.body}')),
         );
       }
     } catch (e) {
@@ -187,8 +178,8 @@ class _UserMainState extends State<UserMain> {
 
   void _clearForm() {
     setState(() {
-      _selectedPickup = null;
-      _selectedDropoff = null;
+      selectedPickupId = null;
+      selectedDropoffId = null;
     });
   }
 
@@ -197,12 +188,16 @@ class _UserMainState extends State<UserMain> {
     setState(() => _isLoading = true);
     try {
       final response = await http.post(
-        Uri.parse('$apiUrl/requests/$_currentRequestId/cancel'),
+        Uri.parse('$apiUrl/cancelRequest/$_currentRequestId'),
       );
+
       if (response.statusCode == 200 && mounted) {
         setState(() {
           _currentRequestId = null;
           _isLoading = false;
+          _markers.clear();
+          _currentlyTrackedDriverId = null;
+          _driverSubscription?.cancel();
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('ยกเลิกคำขอแล้ว')),
@@ -258,33 +253,33 @@ class _UserMainState extends State<UserMain> {
     final pickupLocationGeo = pickupDoc.data()!['coordinates'] as GeoPoint;
     final pickupLatLng =
         LatLng(pickupLocationGeo.latitude, pickupLocationGeo.longitude);
-    final distanceInMeters = Geolocator.distanceBetween(driverLatLng.latitude,
-        driverLatLng.longitude, pickupLatLng.latitude, pickupLatLng.longitude);
-    final distanceInKm = distanceInMeters / 1000;
 
     final driverMarker = Marker(
-      markerId: const MarkerId('driver'),
-      position: driverLatLng,
-      icon: _tramIcon ?? BitmapDescriptor.defaultMarker,
-      anchor: const Offset(0.5, 0.5),
-      flat: true,
-    );
+        markerId: const MarkerId('driver'),
+        position: driverLatLng,
+        icon: _tramIcon ?? BitmapDescriptor.defaultMarker,
+        anchor: const Offset(0.5, 0.5),
+        flat: true,
+        infoWindow: const InfoWindow(title: "คนขับ"));
     final pickupMarker = Marker(
       markerId: const MarkerId('pickup'),
       position: pickupLatLng,
-      infoWindow: const InfoWindow(title: 'จุดรับ'),
+      infoWindow: const InfoWindow(title: 'จุดรับของคุณ'),
       icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
     );
 
-    setState(() {
-      _driverPosition = driverLatLng;
-      _markers.clear();
-      _markers.add(driverMarker);
-      _markers.add(pickupMarker);
-      _distanceMessage =
-          'คนขับจะมาถึงใน ${distanceInKm.toStringAsFixed(2)} กม.';
-    });
-    _mapController?.animateCamera(CameraUpdate.newLatLng(driverLatLng));
+    if (mounted) {
+      setState(() {
+        _driverPosition = driverLatLng;
+        _markers.clear();
+        _markers.add(driverMarker);
+        _markers.add(pickupMarker);
+      });
+    }
+
+    if (_mapController != null) {
+      _mapController!.animateCamera(CameraUpdate.newLatLng(driverLatLng));
+    }
   }
 
   void _centerOnDriver() {
@@ -380,18 +375,36 @@ class _UserMainState extends State<UserMain> {
                       style:
                           TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 24),
-                  _buildDropdown(
-                    hint: 'จุดรับ',
-                    value: _selectedPickup,
-                    onChanged: (val) => setState(() => _selectedPickup = val),
-                    icon: Icons.trip_origin,
+                  DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(labelText: 'จุดรับ'),
+                    value: selectedPickupId,
+                    items: _buildings.map((building) {
+                      return DropdownMenuItem<String>(
+                        value: building.id,
+                        child: Text(building.name),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        selectedPickupId = value;
+                      });
+                    },
                   ),
                   const SizedBox(height: 16),
-                  _buildDropdown(
-                    hint: 'จุดส่ง',
-                    value: _selectedDropoff,
-                    onChanged: (val) => setState(() => _selectedDropoff = val),
-                    icon: Icons.flag,
+                  DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(labelText: 'จุดส่ง'),
+                    value: selectedDropoffId,
+                    items: _buildings.map((building) {
+                      return DropdownMenuItem<String>(
+                        value: building.id,
+                        child: Text(building.name),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        selectedDropoffId = value;
+                      });
+                    },
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(
@@ -412,7 +425,7 @@ class _UserMainState extends State<UserMain> {
                       Navigator.of(context).push(MaterialPageRoute(
                           builder: (context) => const LiveMapScreen()));
                     },
-                    child: const Text('ดูแผนที่',
+                    child: const Text('ดูแผนที่รถทั้งหมด',
                         style: TextStyle(color: Colors.black54)),
                   ),
                   const SizedBox(height: 16),
@@ -423,26 +436,6 @@ class _UserMainState extends State<UserMain> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildDropdown(
-      {required String hint,
-      required Building? value,
-      required ValueChanged<Building?> onChanged,
-      required IconData icon}) {
-    return DropdownButtonFormField<Building>(
-      value: value,
-      decoration: InputDecoration(
-        labelText: hint,
-        prefixIcon: Icon(icon),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16.0),
-      ),
-      items: _buildings
-          .map((b) => DropdownMenuItem(value: b, child: Text(b.name)))
-          .toList(),
-      onChanged: onChanged,
     );
   }
 
@@ -501,12 +494,14 @@ class _UserMainState extends State<UserMain> {
           return const Center(child: CircularProgressIndicator());
         }
         if (!snapshot.hasData || !snapshot.data!.exists) {
+          // This can happen if the request is deleted or the stream is listening to an old ID
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && _currentRequestId != null) {
               setState(() => _currentRequestId = null);
             }
           });
-          return const SizedBox.shrink();
+          return const SizedBox
+              .shrink(); // Return an empty widget while state is updating
         }
 
         final data = snapshot.data!.data() as Map<String, dynamic>;
@@ -534,8 +529,19 @@ class _UserMainState extends State<UserMain> {
                 ],
               ),
             );
+          case 'on_trip':
           case 'accepted':
             if (driverId != null) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  setState(() {
+                    final currentStatus = data['status'] ?? 'accepted';
+                    _distanceMessage = currentStatus == 'accepted'
+                        ? 'คนขับกำลังมารับ...'
+                        : 'กำลังเดินทางไปยังจุดส่ง...';
+                  });
+                }
+              });
               _subscribeToDriverLocation(driverId, _currentRequestId!);
               return _buildDriverTrackingMap();
             }
@@ -549,6 +555,37 @@ class _UserMainState extends State<UserMain> {
               }
             });
             return const Center(child: CircularProgressIndicator());
+
+          case 'no_drivers_available':
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.car_crash_outlined,
+                        size: 80, color: Colors.orange.shade700),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'ขออภัย',
+                      style:
+                          TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'ไม่มีคนขับที่พร้อมให้บริการในขณะนี้',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 18, color: Colors.black54),
+                    ),
+                    const SizedBox(height: 32),
+                    ElevatedButton(
+                      onPressed: () => setState(() => _currentRequestId = null),
+                      child: const Text('กลับไปหน้าแรก'),
+                    )
+                  ],
+                ),
+              ),
+            );
 
           case 'completed':
             _driverSubscription?.cancel();
@@ -684,19 +721,21 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
       final data = doc.data() as Map<String, dynamic>;
       final location = data['currentLocation'] as GeoPoint?;
       final status = data['status'] as String? ?? 'offline';
+      final isAvailable = data['isAvailable'] as bool? ?? false;
 
       LatLng position = const LatLng(0, 0);
       if (location != null) {
         position = LatLng(location.latitude, location.longitude);
       }
 
-      if (status == 'online' && location != null) {
+      if (status == 'online' && isAvailable && location != null) {
         updatedMarkers.add(
           Marker(
             markerId: MarkerId(doc.id),
             position: position,
             icon: _tramIcon ?? BitmapDescriptor.defaultMarker,
-            infoWindow: InfoWindow(title: data['displayName'] ?? 'คนขับ'),
+            infoWindow:
+                InfoWindow(title: data['displayName'] ?? 'คนขับ (ว่าง)'),
             anchor: const Offset(0.5, 0.5),
             flat: true,
           ),
@@ -708,6 +747,7 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
         name: data['displayName'] ?? 'คนขับ',
         position: position,
         status: status,
+        isOnline: status == 'online',
       ));
     }
 
@@ -747,7 +787,7 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
                     itemCount: _allDrivers.length,
                     itemBuilder: (context, index) {
                       final driver = _allDrivers[index];
-                      final bool isOnline = driver.status == 'online';
+                      final bool isOnline = driver.isOnline;
 
                       return Padding(
                         padding: const EdgeInsets.all(8.0),
